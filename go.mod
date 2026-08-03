@@ -9,4 +9,7 @@ require (
 	github.com/emersion/go-smtp v0.21.0
 )
 
-require golang.org/x/text v0.14.0 // indirect
+require (
+	github.com/mattn/go-sqlite3 v1.14.49 // indirect
+	golang.org/x/text v0.14.0 // indirect
+)
