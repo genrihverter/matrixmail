@@ -1,0 +1,37 @@
+```
+# Go-specific ignores
+*.o
+*.a
+*.out
+*.test
+*.prof
+coverage.out
+debug/
+
+# Dependencies
+vendor/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+```
