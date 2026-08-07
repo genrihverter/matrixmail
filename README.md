@@ -1,223 +1,260 @@
-# Matrix Mail & PIM Server
+# Matrix Mail Gateway
 
-Полноценный почтовый и PIM (Personal Information Management) сервер на Go, поддерживающий протоколы **SMTP**, **IMAP**, **CalDAV** и **CardDAV**. Сервер предназначен для интеграции с экосистемой Matrix, обеспечивая работу электронной почты, календарей и контактов с возможностью синхронизации между различными клиентами.
-
-В качестве распределенного хранилища данных используется **RQLite** (SQLite поверх Raft), что обеспечивает отказоустойчивость и возможность масштабирования кластера.
+Сервер уведомлений на Go, который пересылает сообщения из чатов Matrix на email через SMTP relay (например, mail.ru).
 
 ## Особенности
 
-*   **SMTP Сервер**: Прием входящей почты, поддержка аутентификации, ретрансляция (Relay) на внешние серверы через MX-записи.
-*   **IMAP Сервер**: Доступ к почтовым ящикам, поддержка папок, флагов и поиска сообщений.
-*   **CalDAV Сервер**: Управление календарями (RFC 4791), поддержка событий (VEVENT), задач (VTODO).
-*   **CardDAV Сервер**: Управление контактами (RFC 6352), поддержка vCard.
-*   **Хранилище RQLite**: Распределенное, консистентное хранилище для метаданных писем, календарей и контактов.
-*   **Безопасность**: Поддержка Basic Auth, защита от анонимного релея.
-*   **Производительность**: Минималистичная архитектура, отсутствие тяжелых ORM, прямая работа с SQL и буферами.
-*   **Тестируемость**: Покрытие ключевых модулей юнит-тестами.
+*   **Мониторинг комнат Matrix**: Сервер подключается к Matrix homeserver и отслеживает новые сообщения в комнатах.
+*   **SMTP Relay**: Отправка уведомлений на email через внешний SMTP сервер с поддержкой TLS/STARTTLS.
+*   **Гибкое маппирование**: Настройка соответствий между пользователями Matrix и email адресами.
+*   **Фильтрация по комнатам**: Возможность подписки на уведомления из конкретных комнат или всех комнат.
+*   **HTML и текстовые уведомления**: Письма содержат как текстовую, так и HTML версию сообщения.
+*   **Graceful Shutdown**: Корректная остановка сервиса при получении сигнала завершения.
 
 ## Архитектура
-
-Проект структурирован по принципу разделения ответственности:
 
 ```text
 /cmd
   /server         # Точка входа приложения
 /internal
-  /config         # Конфигурация приложения
-  /store          # Слой работы с RQLite (SQL запросы, миграции)
-  /smtp           # Реализация SMTP сервера (backend для emersion/go-smtp)
-  /imap           # Реализация IMAP сервера (backend для emersion/go-imap)
-  /caldav         # Обработчики CalDAV (WebDAV + XML)
-  /carddav        # Обработчики CardDAV (WebDAV + XML)
-  /models         # Структуры данных (User, Message, Event, Contact)
-  /auth           # Логика аутентификации
-/pkg
-  /rqlite-client  # Утилиты для подключения к RQLite
-/tests            # Интеграционные тесты
+  /config         # Конфигурация приложения (JSON)
+  /matrix         # Клиент для работы с Matrix API
+  /notifier       # Логика нотификации (синхронизация и отправка)
+  /smtprelay      # SMTP клиент для отправки email
 ```
 
 ## Требования
 
-*   **Go**: версия 1.21 или выше.
-*   **RQLite**: запущенный кластер или одиночный узел (можно использовать Docker).
-*   **Docker** (опционально): Для быстрого развертывания зависимостей.
+*   **Go**: версия 1.19 или выше.
+*   **Matrix Account**: Аккаунт в Matrix с access token для бота.
+*   **SMTP Relay**: Доступ к SMTP серверу (например, mail.ru, gmail.com).
 
 ## Быстрый старт
 
-### 1. Запуск RQLite
+### 1. Создание конфигурации
 
-Самый простой способ поднять хранилище — использовать Docker:
+Создайте файл `config.json` в корне проекта:
 
-```bash
-docker run -d --name rqlite \
-  -p 4000:4000 -p 4001:4001 \
-  rqlite/rqlite:latest \
-  -node-id 1 -http-addr 0.0.0.0:4000 -raft-addr 0.0.0.0:4001 /rqlite
+```json
+{
+  "smtp_port": 2525,
+  "imap_port": 143,
+  "domain": "localhost",
+  "storage_path": "./maildata",
+  "smtp_relay": {
+    "host": "smtp.mail.ru",
+    "port": 587,
+    "username": "your_email@mail.ru",
+    "password": "your_app_password",
+    "from_address": "your_email@mail.ru",
+    "from_name": "Matrix Bot",
+    "use_tls": false,
+    "use_starttls": true
+  },
+  "matrix_user_mappings": [
+    {
+      "matrix_user_id": "@user1:matrix.org",
+      "email": "user1@example.com",
+      "room_ids": ["!roomid1:matrix.org"],
+      "enabled": true
+    },
+    {
+      "matrix_user_id": "@user2:matrix.org",
+      "email": "user2@gmail.com",
+      "room_ids": [],
+      "enabled": true
+    }
+  ],
+  "matrix": {
+    "homeserver_url": "https://matrix.org",
+    "access_token": "your_access_token_here",
+    "user_id": "@botname:matrix.org",
+    "enabled": true,
+    "request_timeout": 30,
+    "reconnect_delay": 10
+  }
+}
 ```
 
-Проверка доступности:
+**Важно**: Для mail.ru необходимо использовать [пароль приложения](https://help.mail.ru/mail-help/security/2fa), а не основной пароль от почты.
+
+### 2. Получение Matrix Access Token
+
+1.  Войдите в свой аккаунт Matrix через Element или другой клиент.
+2.  Перейдите в настройки аккаунта -> Help & About -> Advanced -> Access Token.
+3.  Скопируйте токен и укажите его в конфигурации.
+
+Или используйте API:
+
 ```bash
-curl http://localhost:4000/status
-```
-
-### 2. Конфигурация
-
-Создайте файл `config.yaml` в корне проекта:
-
-```yaml
-server:
-  smtp_port: 2525
-  imap_port: 143
-  dav_port: 8080
-  domain: "example.com"
-
-rqlite:
-  address: "http://localhost:4000"
-  # Для кластера можно указать несколько адресов
-  
-auth:
-  # В реальной системе используйте интеграцию с Matrix Auth API
-  # Здесь для примера статические пользователи
-  users:
-    - username: "alice"
-      password: "secret123"
-    - username: "bob"
-      password: "password456"
-
-storage:
-  # Путь для хранения больших вложений (опционально, если не в RQLite)
-  attachments_path: "./data/attachments"
+curl -X POST 'https://matrix.org/_matrix/client/v3/login' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{
+    "type": "m.login.password",
+    "identifier": {"type": "m.id.user", "user": "your_username"},
+    "password": "your_password"
+  }'
 ```
 
 ### 3. Установка зависимостей и запуск
 
 ```bash
-# Инициализация модуля (если еще не сделана)
-go mod init matrix-mail-server
-
 # Установка зависимостей
 go mod tidy
 
 # Запуск сервера
-go run ./cmd/server -config config.yaml
+go run ./cmd/server -config config.json
 ```
-
-Сервер запустится и автоматически выполнит миграции схемы БД в RQLite при первом старте.
 
 ## Использование
 
-### Почта (SMTP/IMAP)
+### Конфигурация maппирования пользователей
 
-**Отправка письма (SMTP):**
-```bash
-echo "Тестовое письмо" | sendmail -S localhost:2525 -f alice@example.com bob@example.com
-```
-Или через telnet:
-```bash
-telnet localhost 2525
-HELO client
-MAIL FROM:<alice@example.com>
-RCPT TO:<bob@example.com>
-DATA
-Subject: Привет
-Это тест.
-.
-QUIT
-```
+В секции `matrix_user_mappings` указываются пользователи, которые будут получать уведомления:
 
-**Чтение почты (IMAP):**
-Подключитесь любым почтовым клиентом (Thunderbird, Outlook, Apple Mail):
-*   **Сервер**: `localhost`
-*   **Порт IMAP**: `143`
-*   **Логин/Пароль**: из конфига (например, `alice` / `secret123`)
-*   **SSL/TLS**: Отключено (для локального теста), в продакшене используйте StartTLS.
+*   `matrix_user_id`: UserID в Matrix (например, `@username:matrix.org`).
+*   `email`: Email адрес для получения уведомлений.
+*   `room_ids`: Список комнат для мониторинга. Если пустой (`[]`) — уведомления приходят из всех комнат, где участвует бот. Можно указать `"*"` для всех комнат.
+*   `enabled`: Включить или выключить уведомления для этого пользователя.
 
-### Календари и Контакты (CalDAV/CardDAV)
+### Примеры сценариев
 
-Сервер доступен по адресу `http://localhost:8080`.
+**Сценарий 1: Личные уведомления**
+Каждый пользователь получает уведомления о всех сообщениях в комнатах, где он состоит:
 
-**Базовые URL:**
-*   Календари: `http://localhost:8080/dav/calendars/{username}/`
-*   Контакты: `http://localhost:8080/dav/contacts/{username}/`
-
-**Пример создания события (cURL):**
-
-```bash
-curl -X PUT http://localhost:8080/dav/calendars/alice/event1.ics \
-  -u alice:secret123 \
-  -H "Content-Type: text/calendar" \
-  -H "If-None-Match: *" \
-  --data-binary @- << EOF
-BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Matrix Server//EN
-BEGIN:VEVENT
-UID:event1@example.com
-DTSTAMP:20231027T100000Z
-DTSTART:20231028T090000Z
-DTEND:20231028T100000Z
-SUMMARY:Встреча с командой
-END:VEVENT
-END:VCALENDAR
-EOF
+```json
+{
+  "matrix_user_mappings": [
+    {
+      "matrix_user_id": "@alice:matrix.org",
+      "email": "alice@example.com",
+      "room_ids": [],
+      "enabled": true
+    }
+  ]
+}
 ```
 
-**Пример добавления контакта:**
+**Сценарий 2: Уведомления из конкретной комнаты**
+Пользователь получает уведомления только из указанных комнат:
 
-```bash
-curl -X PUT http://localhost:8080/dav/contacts/alice/contact1.vcf \
-  -u alice:secret123 \
-  -H "Content-Type: text/vcard" \
-  --data-binary @- << EOF
-BEGIN:VCARD
-VERSION:3.0
-FN:Иван Иванов
-N:Иванов;Иван;;;
-EMAIL;TYPE=WORK:ivan@example.com
-TEL;TYPE=CELL:+79990000000
-END:VCARD
-EOF
+```json
+{
+  "matrix_user_mappings": [
+    {
+      "matrix_user_id": "@bob:matrix.org",
+      "email": "bob@example.com",
+      "room_ids": ["!projectRoom:matrix.org"],
+      "enabled": true
+    }
+  ]
+}
 ```
 
-### Интеграция с клиентами
+**Сценарий 3: Несколько получателей**
+Одно сообщение может быть отправлено нескольким пользователям:
 
-*   **iOS/macOS**: Добавьте учетную запись типа "Другая" -> "Учетная запись CalDAV/CardDAV".
-*   **Android**: Используйте приложение DAVx5.
-    *   Тип входа: URL и логин/пароль.
-    *   Базовый URL: `http://<ваш-ip>:8080/dav/`
-*   **Thunderbird**: Встроенная поддержка CalDAV/CardDAV при настройке учетной записи.
-*   **Matrix Client (Element)**: Требуется мост (bridge) или виджет, использующий данный API для отображения календаря в комнате Matrix.
+```json
+{
+  "matrix_user_mappings": [
+    {
+      "matrix_user_id": "@user1:matrix.org",
+      "email": "user1@company.com",
+      "room_ids": ["!general:matrix.org"],
+      "enabled": true
+    },
+    {
+      "matrix_user_id": "@user2:matrix.org",
+      "email": "user2@company.com",
+      "room_ids": ["!general:matrix.org"],
+      "enabled": true
+    }
+  ]
+}
+```
 
-## Разработка и Тесты
+## Пример письма
 
-Проект покрыт тестами. Для запуска:
+Уведомление приходит в формате HTML и текста:
+
+```
+Тема: Сообщение в комнате "Общая" от Иван Иванов
+
+От: Иван Иванов (@ivan:matrix.org)
+Комната: Общая
+
+Привет всем! Это тестовое сообщение.
+
+---
+Это автоматическое уведомление от Matrix Mail Gateway
+```
+
+## Разработка и тесты
 
 ```bash
 # Запуск всех тестов
 go test ./...
 
-# Запуск тестов с выводом покрытия
+# Запуск тестов с покрытием
 go test ./... -coverprofile=coverage.out
 go tool cover -html=coverage.out
+
+# Сборка бинарного файла
+go build -o matrix-mail-gateway ./cmd/server
 ```
 
-Для локального тестирования RQLite в тестах используется временный инстанс в памяти или Docker-контейнер (см. `internal/store/test_helpers.go`).
+## Производительность
 
-## Производительность и Масштабирование
+*   **Асинхронная отправка**:Email отправляются асинхронно в отдельных горутине, что не блокирует обработку новых сообщений Matrix.
+*   **Кэширование имен**: Отображаемые имена пользователей и названия комнат кэшируются для уменьшения количества запросов к Matrix API.
+*   **Long-polling Sync**: Используется механизм `/sync` API Matrix с long-polling для эффективного получения новых событий.
 
-1.  **RQLite Cluster**: Для повышения отказоустойчивости запустите несколько узлов RQLite. Сервер автоматически подключится к лидеру кластера.
-2.  **Stateless Backend**: Сам Go-сервер не хранит состояния. Вы можете запустить несколько экземпляров сервера за балансировщиком нагрузки (Nginx, HAProxy).
-3.  **Вложения**: Большие бинарные вложения писем рекомендуется хранить в объектном хранилище (S3), сохраняя в RQLite только метаданные и ссылки (в текущей реализации для простоты все хранится в БД, но архитектура позволяет вынести это в отдельный интерфейс `BlobStore`).
+## Безопасность
+
+*   **Access Token**: Храните access token в безопасном месте, не коммитьте его в репозиторий.
+*   **SMTP Пароль**: Используйте пароль приложения вместо основного пароля.
+*   **TLS/STARTTLS**: Всегда включайте шифрование при подключении к SMTP серверу.
+
+## Структура проекта
+
+```
+mail-matrix-server/
+├── cmd/
+│   └── server/
+│       └── main.go           # Точка входа
+├── internal/
+│   ├── config/
+│   │   └── config.go         # Конфигурация и загрузка JSON
+│   ├── matrix/
+│   │   ├── client.go         # Matrix API клиент
+│   │   └── client_test.go    # Тесты Matrix клиента
+│   ├── notifier/
+│   │   └── notifier.go       # Логика нотификации
+│   └── smtprelay/
+│       ├── relay.go          # SMTP relay клиент
+│       └── relay_test.go     # Тесты SMTP клиента
+├── config.example.json       # Пример конфигурации
+├── go.mod                    # Go модуль
+└── README.md                 # Документация
+```
 
 ## Лицензия
 
 MIT License.
 
-## Примечание для разработчиков
+## Troubleshooting
 
-Код написан с упором на читаемость и простоту поддержки.
-*   Используется стандартный пакет `database/sql` с драйвером `github.com/rqlite/gorqlite`.
-*   XML парсинг для WebDAV реализован через `encoding/xml`.
-*   Логирование осуществляется через `log/slog` (стандарт Go 1.21+).
+**Ошибка аутентификации SMTP**:
+*   Проверьте логин и пароль (для mail.ru используйте пароль приложения).
+*   Убедитесь, что `from_address` совпадает с `username`.
+*   Проверьте порт (587 для STARTTLS, 465 для SMTPS).
 
-При расширении функционала (например, добавление поддержки шифрования PGP или глубокой интеграции с Matrix Synapse через Admin API) следуйте структуре пакета `/internal`.
+**Ошибка подключения к Matrix**:
+*   Проверьте `homeserver_url` (должен включать `https://`).
+*   Убедитесь, что `access_token` действителен.
+*   Проверьте сеть и фаервол.
+
+**Уведомления не приходят**:
+*   Проверьте `enabled: true` в настройках маппинга.
+*   Убедитесь, что бот состоит в указанных комнатах.
+*   Проверьте логи сервера на наличие ошибок.
