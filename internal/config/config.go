@@ -18,6 +18,12 @@ type Config struct {
 	StoragePath string `json:"storage_path"`
 	// Настройки для внешних почтовых серверов
 	ExternalServers []ExternalServer `json:"external_servers"`
+	// Настройки SMTP relay для отправки уведомлений
+	SMTPRelay SMTPRelayConfig `json:"smtp_relay"`
+	// Соответствия пользователей Matrix и Email
+	MatrixUserMappings []MatrixUserMapping `json:"matrix_user_mappings"`
+	// Настройки подключения к Matrix
+	Matrix MatrixConfig `json:"matrix"`
 }
 
 // ExternalServer - конфигурация внешнего почтового сервера
@@ -38,6 +44,54 @@ type ExternalServer struct {
 	Password string `json:"password"`
 	// Использовать TLS
 	UseTLS bool `json:"use_tls"`
+}
+
+// SMTPRelayConfig - настройки SMTP релея для отправки уведомлений
+type SMTPRelayConfig struct {
+	// Хост SMTP сервера (например, smtp.mail.ru)
+	Host string `json:"host"`
+	// Порт SMTP сервера (587 для STARTTLS, 465 для SMTPS)
+	Port int `json:"port"`
+	// Логин для аутентификации
+	Username string `json:"username"`
+	// Пароль для аутентификации
+	Password string `json:"password"`
+	// Адрес отправителя (должен совпадать с Username)
+	FromAddress string `json:"from_address"`
+	// Имя отправителя
+	FromName string `json:"from_name"`
+	// Использовать TLS (SMTPS)
+	UseTLS bool `json:"use_tls"`
+	// Использовать STARTTLS
+	UseSTARTTLS bool `json:"use_starttls"`
+}
+
+// MatrixUserMapping - соответствие пользователя Matrix и Email
+type MatrixUserMapping struct {
+	// UserID в Matrix (например, @username:matrix.org)
+	MatrixUserID string `json:"matrix_user_id"`
+	// Email адрес для получения уведомлений
+	Email string `json:"email"`
+	// Список комнат Matrix для мониторинга (опционально, если пусто - все комнаты)
+	RoomIDs []string `json:"room_ids,omitempty"`
+	// Включить уведомления для этого пользователя
+	Enabled bool `json:"enabled"`
+}
+
+// MatrixConfig - настройки подключения к Matrix
+type MatrixConfig struct {
+	// Homeserver URL (например, https://matrix.org)
+	HomeserverURL string `json:"homeserver_url"`
+	// Access токен для аутентификации бота
+	AccessToken string `json:"access_token"`
+	// UserID бота (например, @botname:matrix.org)
+	UserID string `json:"user_id"`
+	// Включить синхронизацию
+	Enabled bool `json:"enabled"`
+	// Таймаут для запросов к Matrix API (в секундах)
+	RequestTimeout int `json:"request_timeout"`
+	// Интервал повторной синхронизации при ошибке (в секундах)
+	ReconnectDelay int `json:"reconnect_delay"`
 }
 
 // LoadConfig загружает конфигурацию из JSON файла
@@ -64,5 +118,9 @@ func DefaultConfig() *Config {
 		IMAPPort:    143,
 		Domain:      "localhost",
 		StoragePath: "./maildata",
+		Matrix: MatrixConfig{
+			RequestTimeout: 30,
+			ReconnectDelay: 10,
+		},
 	}
 }

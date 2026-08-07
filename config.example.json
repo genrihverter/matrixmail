@@ -1,0 +1,39 @@
+{
+  "smtp_port": 2525,
+  "imap_port": 143,
+  "domain": "localhost",
+  "storage_path": "./maildata",
+  "smtp_relay": {
+    "host": "smtp.mail.ru",
+    "port": 587,
+    "username": "your_email@mail.ru",
+    "password": "your_password",
+    "from_address": "your_email@mail.ru",
+    "from_name": "Matrix Bot",
+    "use_tls": false,
+    "use_starttls": true
+  },
+  "matrix_user_mappings": [
+    {
+      "matrix_user_id": "@user1:matrix.org",
+      "email": "user1@example.com",
+      "room_ids": ["!roomid1:matrix.org", "!roomid2:matrix.org"],
+      "enabled": true
+    },
+    {
+      "matrix_user_id": "@user2:matrix.org",
+      "email": "user2@gmail.com",
+      "room_ids": [],
+      "enabled": true
+    }
+  ],
+  "matrix": {
+    "homeserver_url": "https://matrix.org",
+    "access_token": "your_access_token_here",
+    "user_id": "@botname:matrix.org",
+    "enabled": true,
+    "request_timeout": 30,
+    "reconnect_delay": 10
+  },
+  "external_servers": []
+}
